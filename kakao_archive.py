@@ -1,96 +1,88 @@
 import streamlit as st
-import pandas as pd
+from pydrive2.auth import GoogleAuth
+from pydrive2.drive import GoogleDrive
+from oauth2client.service_account import ServiceAccountCredentials
 import re
-import io
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
 
-# --- 1. 구글 API 인증 (스트림릿 클라우드 시크릿 활용) ---
-def get_drive_service():
-    # 스트림릿 클라우드 웹사이트의 Settings > Secrets에 입력한 값을 가져옵니다.
-    creds_info = st.secrets["gcp_service_account"]
-    creds = service_account.Credentials.from_service_account_info(creds_info)
-    return build('drive', 'v3', credentials=creds)
+# --- 1. 보안 로그인 ---
+def check_password():
+    if "password_correct" not in st.session_state:
+        st.session_state["password_correct"] = False
 
-# 전역 서비스 객체 생성
-service = get_drive_service()
-FOLDER_ID = "1TJbWF3x_pj2htu77bbf4WhlfX390cYxe"
+    if not st.session_state["password_correct"]:
+        st.title("🔒 Private Archive")
+        pwd = st.text_input("비밀번호를 입력하세요", type="password")
+        if st.button("로그인"):
+            if pwd == st.secrets["APP_PASSWORD"]: # Secrets에 설정한 비번
+                st.session_state["password_correct"] = True
+                st.rerun()
+            else:
+                st.error("비밀번호가 틀렸습니다.")
+        return False
+    return True
 
-# --- 2. 데이터 가져오기 (캐싱 적용) ---
-@st.cache_data(ttl=600) # 10분마다 갱신
-def fetch_data():
-    results = service.files().list(
-        q=f"'{FOLDER_ID}' in parents", 
-        fields="files(id, name)"
-    ).execute()
-    files = results.get('files', [])
-    
-    txt_file = next((f for f in files if f['name'] == 'kakao.txt'), None)
-    if not txt_file:
-        return None, None
-    
-    request = service.files().get_media(fileId=txt_file['id'])
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    
-    return fh.getvalue().decode('utf-8'), files
+# --- 2. 구글 드라이브 연결 ---
+@st.cache_resource
+def get_drive():
+    scope = ['https://www.googleapis.com/auth/drive']
+    # Secrets에서 서비스 계정 정보 로드
+    key_dict = st.secrets["gcp_service_account"]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(key_dict, scope)
+    gauth = GoogleAuth()
+    gauth.credentials = creds
+    return GoogleDrive(gauth)
 
-# --- 3. 파싱 함수 ---
-def parse_kakao(text):
-    date_pattern = re.compile(r'^-+ (\d{4}년 \d{1,2}월 \d{1,2}일 .요일) -+$')
-    msg_pattern = re.compile(r'^\[(.+?)\] \[(.+?)\] (.+)$')
+# --- 3. 텍스트 파싱 로직 (카톡 형식 분석) ---
+def parse_kakao_text(text_content):
+    lines = text_content.split('\n')
+    chat_data = []
+    current_date = ""
     
-    data = []
-    current_date = None
-    for line in text.split('\n'):
-        line = line.strip()
-        d_match = date_pattern.match(line)
-        if d_match:
-            current_date = d_match.group(1)
+    # 날짜 구분선 패턴 (예: --------------- 2026년 2월 12일 목요일 ---------------)
+    date_pattern = re.compile(r'-+ (\d{4}년 \d{1,2}월 \d{1,2}일) .?요일 -+')
+    # 메시지 패턴 (예: [이름] [오후 3:30] 메시지)
+    msg_pattern = re.compile(r'\[(.+?)\] \[(.+? \d{1,2}:\d{2})\] (.+)')
+
+    for line in lines:
+        date_match = date_pattern.match(line)
+        if date_match:
+            current_date = date_match.group(1)
             continue
-        m_match = msg_pattern.match(line)
-        if m_match and current_date:
-            content = m_match.group(3)
-            img_name = None
-            if "파일: " in content:
-                img_name = content.replace("파일: ", "").strip()
-                if not img_name.lower().endswith(('.jpg', '.png', '.jpeg', '.gif')):
-                    img_name = None
-
-            data.append({
-                'date': current_date, 'user': m_match.group(1),
-                'time': m_match.group(2), 'message': content, 'img_name': img_name
+            
+        msg_match = msg_pattern.match(line)
+        if msg_match:
+            chat_data.append({
+                "date": current_date,
+                "user": msg_match.group(1),
+                "time": msg_match.group(2),
+                "msg": msg_match.group(3)
             })
-    return pd.DataFrame(data)
+    return chat_data
 
-# --- 4. 메인 화면 구성 ---
-st.set_page_config(page_title="카톡 아카이브", layout="centered")
-st.title("💬 My Kakao Archive")
+# --- 4. 메인 화면 ---
+if check_password():
+    st.set_page_config(page_title="My Kakao Archive", layout="wide")
+    drive = get_drive()
+    
+    st.sidebar.title("📁 아카이브 목록")
+    # 구글 드라이브에서 '카카오톡_통합_아카이브' 폴더 찾기 로직 등...
+    # (실제 구현 시 폴더 ID를 Secrets에 넣어두면 더 빠릅니다)
+    
+    st.title("💬 카카오톡 대화방")
+    
+    # 예시: 텍스트 파일 하나를 읽어와서 화면에 뿌리기
+    # 실제로는 드라이브에서 최신 txt 파일을 가져오게 설정합니다.
+    sample_text = "[나] [오후 4:00] 오늘 체리 사진입니다.\n[나] [오후 4:01] 사진" # 예시 데이터
+    chats = parse_kakao_text(sample_text)
 
-try:
-    raw_text, file_list = fetch_data()
-    if raw_text:
-        df = parse_kakao(raw_text)
-        all_dates = df['date'].unique().tolist()
-        selected_date = st.sidebar.selectbox("📅 날짜 선택", all_dates[::-1])
-        
-        st.subheader(f"📅 {selected_date}")
-        day_df = df[df['date'] == selected_date]
-
-        for _, row in day_df.iterrows():
-            with st.chat_message("user"):
-                st.caption(f"{row['user']} | {row['time']}")
-                if row['img_name']:
-                    img_file = next((f for f in file_list if f['name'] == row['img_name']), None)
-                    if img_file:
-                        st.image(f"https://drive.google.com/uc?id={img_file['id']}")
-                    else:
-                        st.info(f"🖼 사진 없음: {row['img_name']}")
-                else:
-                    st.write(row['message'])
-except Exception as e:
-    st.error(f"연동 오류: {e}")
+    for chat in chats:
+        is_me = chat['user'] == "나" # 본인 이름으로 설정
+        with st.chat_message("user" if is_me else "assistant"):
+            st.write(f"**{chat['user']}** ({chat['time']})")
+            st.write(chat['msg'])
+            
+            # 사진 매칭 로직: 메시지가 "사진"일 경우 해당 시간대의 이미지를 드라이브에서 검색
+            if "사진" in chat['msg']:
+                # drive.ListFile 쿼리로 해당 날짜/시간의 이미지를 가져와 표시
+                # st.image(image_url)
+                pass
