@@ -6,18 +6,20 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
 import re
 import os
+import json # 필수 모듈
 
-# --- 1. 구글 드라이브 인증 (가장 단순한 표준 방식) ---
+# --- 1. 구글 드라이브 인증 (JSON 원본 사용) ---
 def get_gdrive_service():
     try:
-        # Secrets에서 바로 딕셔너리로 가져오기 (변환 불필요)
-        info = dict(st.secrets["gdrive_service_account"])
+        # Secrets에서 문자열을 가져와서 JSON 객체로 변환
+        # 이 과정에서 줄바꿈 문자 처리가 자동으로 완벽하게 해결됩니다.
+        json_str = st.secrets["GOOGLE_CREDENTIALS"]
+        creds_dict = json.loads(json_str)
         
-        # 키 생성 (이제 replace 같은 거 안 해도 됩니다)
-        creds = service_account.Credentials.from_service_account_info(info)
+        creds = service_account.Credentials.from_service_account_info(creds_dict)
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"구글 인증 실패: {e}")
+        st.error(f"구글 인증 치명적 오류: {e}")
         st.stop()
 
 # 서비스 초기화
@@ -49,12 +51,12 @@ def download_csv_from_drive():
     fh.seek(0)
     return pd.read_csv(fh)
 
-# --- 3. 로그인 및 데이터 처리 ---
+# --- 3. 로그인 및 파싱 ---
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if not st.session_state["authenticated"]:
-        st.title("🔐 Kakao Archive Login")
+        st.title("🔐 Kakao Archive")
         pwd = st.text_input("Password", type="password")
         if st.button("Login"):
             if pwd == st.secrets["MY_PASSWORD"]:
