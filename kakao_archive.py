@@ -6,15 +6,14 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
 import re
 import os
-import json  # <--- json 모듈 필수
 
-# --- 1. 구글 드라이브 인증 (JSON 통짜 로드 방식) ---
+# --- 1. 구글 드라이브 인증 (가장 단순한 표준 방식) ---
 def get_gdrive_service():
     try:
-        # Secrets에 저장된 JSON 문자열을 그대로 파싱
-        # 이 방식은 줄바꿈 문자(\n)가 깨지지 않고 완벽하게 복원됩니다.
-        info = json.loads(st.secrets["GOOGLE_JSON"])
+        # Secrets에서 바로 딕셔너리로 가져오기 (변환 불필요)
+        info = dict(st.secrets["gdrive_service_account"])
         
+        # 키 생성 (이제 replace 같은 거 안 해도 됩니다)
         creds = service_account.Credentials.from_service_account_info(info)
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
@@ -50,18 +49,18 @@ def download_csv_from_drive():
     fh.seek(0)
     return pd.read_csv(fh)
 
-# --- 3. 로그인 및 파싱 ---
+# --- 3. 로그인 및 데이터 처리 ---
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if not st.session_state["authenticated"]:
-        st.title("🔐 Kakao Archive")
+        st.title("🔐 Kakao Archive Login")
         pwd = st.text_input("Password", type="password")
         if st.button("Login"):
             if pwd == st.secrets["MY_PASSWORD"]:
                 st.session_state["authenticated"] = True
                 st.rerun()
-            else: st.error("Wrong Password")
+            else: st.error("비밀번호 오류")
         return False
     return True
 
@@ -87,11 +86,11 @@ if check_password():
     if df is None: df = pd.DataFrame(columns=["date", "user", "msg"])
 
     with st.sidebar:
-        st.header("⚙️ 업데이트")
+        st.header("⚙️ 동기화")
         txt_file = st.file_uploader("카톡 .txt 업로드", type="txt")
-        if st.button("드라이브 동기화"):
+        if st.button("구글 드라이브 업데이트"):
             if txt_file:
-                with st.spinner("처리 중..."):
+                with st.spinner("업데이트 중..."):
                     new_df = parse_kakao(txt_file.read().decode("utf-8"))
                     df = pd.concat([df, new_df]).drop_duplicates(subset=["date", "user", "msg"])
                     df.to_csv("temp_db.csv", index=False)
@@ -99,7 +98,7 @@ if check_password():
                     st.success("완료!")
                     st.rerun()
 
-    search = st.text_input("🔍 메시지 검색")
+    search = st.text_input("🔍 검색")
     view_df = df.copy()
     if search:
         view_df = view_df[view_df['msg'].str.contains(search, na=False) | view_df['user'].str.contains(search, na=False)]
