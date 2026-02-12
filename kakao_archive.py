@@ -6,28 +6,34 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
 import re
 import os
-import json # 필수 모듈
+import json
 
-# --- 1. 구글 드라이브 인증 (JSON 원본 사용) ---
+# --- 1. 구글 드라이브 인증 (파일 직접 로드) ---
 def get_gdrive_service():
     try:
-        # Secrets에서 문자열을 가져와서 JSON 객체로 변환
-        # 이 과정에서 줄바꿈 문자 처리가 자동으로 완벽하게 해결됩니다.
-        json_str = st.secrets["GOOGLE_CREDENTIALS"]
-        creds_dict = json.loads(json_str)
+        # 같은 폴더에 있는 'google_key.json' 파일을 직접 읽습니다.
+        # Secrets 설정 필요 없음.
+        key_file_path = "google_key.json"
         
-        creds = service_account.Credentials.from_service_account_info(creds_dict)
+        if not os.path.exists(key_file_path):
+            st.error(f"오류: '{key_file_path}' 파일을 찾을 수 없습니다. 폴더에 파일을 넣었는지 확인하세요.")
+            st.stop()
+            
+        creds = service_account.Credentials.from_service_account_file(key_file_path)
         return build('drive', 'v3', credentials=creds)
     except Exception as e:
-        st.error(f"구글 인증 치명적 오류: {e}")
+        st.error(f"인증 오류: {e}")
         st.stop()
 
 # 서비스 초기화
 service = get_gdrive_service()
-FOLDER_ID = st.secrets["FOLDER_ID"]
-DB_FILE_NAME = "kakao_db.csv"
 
-# --- 2. 드라이브 유틸리티 ---
+# --- 2. 설정 (FOLDER_ID는 직접 여기에 적으세요) ---
+FOLDER_ID = "1TJbWF3x_pj2htu77bbf4WhlfX390cYxe"
+DB_FILE_NAME = "kakao_db.csv"
+MY_PASSWORD = "fnql"  # 비밀번호도 그냥 여기에 적음
+
+# --- 3. 드라이브 유틸리티 ---
 def upload_to_drive(file_path, file_name, mime_type='text/csv'):
     file_metadata = {'name': file_name, 'parents': [FOLDER_ID]}
     media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
@@ -39,27 +45,30 @@ def upload_to_drive(file_path, file_name, mime_type='text/csv'):
         service.files().create(body=file_metadata, media_body=media).execute()
 
 def download_csv_from_drive():
-    query = f"name='{DB_FILE_NAME}' and '{FOLDER_ID}' in parents and trashed=false"
-    results = service.files().list(q=query).execute().get('files', [])
-    if not results: return None
-    request = service.files().get_media(fileId=results[0]['id'])
-    fh = io.BytesIO()
-    downloader = MediaIoBaseDownload(fh, request)
-    done = False
-    while not done:
-        _, done = downloader.next_chunk()
-    fh.seek(0)
-    return pd.read_csv(fh)
+    try:
+        query = f"name='{DB_FILE_NAME}' and '{FOLDER_ID}' in parents and trashed=false"
+        results = service.files().list(q=query).execute().get('files', [])
+        if not results: return None
+        request = service.files().get_media(fileId=results[0]['id'])
+        fh = io.BytesIO()
+        downloader = MediaIoBaseDownload(fh, request)
+        done = False
+        while not done:
+            _, done = downloader.next_chunk()
+        fh.seek(0)
+        return pd.read_csv(fh)
+    except:
+        return None
 
-# --- 3. 로그인 및 파싱 ---
+# --- 4. 로그인 및 파싱 ---
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
     if not st.session_state["authenticated"]:
-        st.title("🔐 Kakao Archive")
+        st.title("🔐 Kakao Archive Login")
         pwd = st.text_input("Password", type="password")
         if st.button("Login"):
-            if pwd == st.secrets["MY_PASSWORD"]:
+            if pwd == MY_PASSWORD:
                 st.session_state["authenticated"] = True
                 st.rerun()
             else: st.error("비밀번호 오류")
@@ -79,7 +88,7 @@ def parse_kakao(content):
             data.append({"date": f"{current_date} {time}", "user": user, "msg": msg})
     return pd.DataFrame(data)
 
-# --- 4. 메인 화면 ---
+# --- 5. 메인 화면 ---
 if check_password():
     st.set_page_config(page_title="카톡 아카이브", layout="wide")
     st.title("📱 카톡 데이터 보관소")
