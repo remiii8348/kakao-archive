@@ -6,32 +6,14 @@ from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
 import re
 import os
+import json  # <--- json 모듈 필수
 
-# --- 1. 구글 드라이브 인증 (슈퍼 클리너 적용) ---
+# --- 1. 구글 드라이브 인증 (JSON 통짜 로드 방식) ---
 def get_gdrive_service():
     try:
-        # 개별 키 로드
-        raw_key = st.secrets["PRIVATE_KEY"]
-        
-        # 1차 청소: 문자열 형태의 \n이 있으면 실제 줄바꿈으로 변경
-        clean_key = raw_key.replace("\\n", "\n")
-        
-        # 2차 청소: 각 줄 끝의 불필요한 공백 제거 (PEM 로더 에러의 주범)
-        clean_key = "\n".join([line.strip() for line in clean_key.strip().split("\n")])
-        
-        info = {
-            "type": st.secrets["TYPE"],
-            "project_id": st.secrets["PROJECT_ID"],
-            "private_key_id": st.secrets["PRIVATE_KEY_ID"],
-            "private_key": clean_key,
-            "client_email": st.secrets["CLIENT_EMAIL"],
-            "client_id": st.secrets["CLIENT_ID"],
-            "auth_uri": st.secrets["AUTH_URI"],
-            "token_uri": st.secrets["TOKEN_URI"],
-            "auth_provider_x509_cert_url": st.secrets["AUTH_PROVIDER_X509_CERT_URL"],
-            "client_x509_cert_url": st.secrets["CLIENT_X509_CERT_URL"],
-            "universe_domain": st.secrets["UNIVERSE_DOMAIN"]
-        }
+        # Secrets에 저장된 JSON 문자열을 그대로 파싱
+        # 이 방식은 줄바꿈 문자(\n)가 깨지지 않고 완벽하게 복원됩니다.
+        info = json.loads(st.secrets["GOOGLE_JSON"])
         
         creds = service_account.Credentials.from_service_account_info(info)
         return build('drive', 'v3', credentials=creds)
@@ -45,9 +27,9 @@ FOLDER_ID = st.secrets["FOLDER_ID"]
 DB_FILE_NAME = "kakao_db.csv"
 
 # --- 2. 드라이브 유틸리티 ---
-def upload_to_drive(file_path, file_name):
+def upload_to_drive(file_path, file_name, mime_type='text/csv'):
     file_metadata = {'name': file_name, 'parents': [FOLDER_ID]}
-    media = MediaFileUpload(file_path, mimetype='text/csv', resumable=True)
+    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
     query = f"name='{file_name}' and '{FOLDER_ID}' in parents and trashed=false"
     results = service.files().list(q=query).execute().get('files', [])
     if results:
@@ -68,7 +50,7 @@ def download_csv_from_drive():
     fh.seek(0)
     return pd.read_csv(fh)
 
-# --- 3. 로그인 및 대화 파싱 ---
+# --- 3. 로그인 및 파싱 ---
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
