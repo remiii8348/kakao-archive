@@ -8,15 +8,16 @@ import re
 import os
 import json
 
-# --- 1. 구글 드라이브 인증 (파일 직접 로드) ---
+# --- 1. 구글 드라이브 인증 (절대 경로 강제 지정) ---
 def get_gdrive_service():
     try:
-        # 같은 폴더에 있는 'google_key.json' 파일을 직접 읽습니다.
-        # Secrets 설정 필요 없음.
-        key_file_path = "google_key.json"
+        # [수정됨] 무조건 사용자 바탕화면의 파일을 찾도록 경로 고정
+        # 파일명이 google_key.json 인지 꼭 확인하세요!
+        key_file_path = r"C:\Users\user\Desktop\google_key.json"
         
         if not os.path.exists(key_file_path):
-            st.error(f"오류: '{key_file_path}' 파일을 찾을 수 없습니다. 폴더에 파일을 넣었는지 확인하세요.")
+            st.error(f"❌ 파일 없음: {key_file_path}")
+            st.write("👉 팁: 바탕화면에 파일 이름이 'google_key.json'이 맞나요? (확장자 확인 필요)")
             st.stop()
             
         creds = service_account.Credentials.from_service_account_file(key_file_path)
@@ -28,10 +29,10 @@ def get_gdrive_service():
 # 서비스 초기화
 service = get_gdrive_service()
 
-# --- 2. 설정 (FOLDER_ID는 직접 여기에 적으세요) ---
+# --- 2. 설정 ---
 FOLDER_ID = "1TJbWF3x_pj2htu77bbf4WhlfX390cYxe"
 DB_FILE_NAME = "kakao_db.csv"
-MY_PASSWORD = "fnql"  # 비밀번호도 그냥 여기에 적음
+MY_PASSWORD = "fnql" 
 
 # --- 3. 드라이브 유틸리티 ---
 def upload_to_drive(file_path, file_name, mime_type='text/csv'):
